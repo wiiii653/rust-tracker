@@ -1,0 +1,66 @@
+[package]
+name = "rust-tracker"
+version = "0.1.0"
+edition = "2021"
+description = "A modern Fast Tracker 2 clone for Linux"
+authors = ["ognjen"]
+license = "MIT"
+
+[dependencies]
+# Module data model & file format I/O (MOD/XM/S3M/IT)
+xmrs = { version = "0.13", features = ["std", "import"] }
+
+# Playback engine
+xmrsplayer = { version = "0.13", features = ["std", "import"] }
+
+# Cross-platform audio I/O
+cpal = "0.18"
+
+# WAV sample loading/saving
+hound = "3.5"
+
+# GUI framework
+egui = "0.31"
+egui-winit = "0.31"
+egui-wgpu = "0.31"
+winit = "0.30"
+wgpu = "24"
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
+# Native file dialogs
+rfd = "0.15"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Serde for config
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# XDG directories
+dirs = "6"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# MIDI input
+midir = "0.11"
+
+# Thread-safe audio buffer
+ringbuf = "0.4"
+
+# Async runtime for wgpu init
+pollster = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 1  # Faster debug builds
