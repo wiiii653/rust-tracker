@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Rust Tracker
+Comment=A modern Fast Tracker 2 clone for Linux
+Exec=rust-tracker %F
+Icon=rust-tracker
+Terminal=false
+Type=Application
+Categories=Audio;AudioVideo;Midi;Music;
+MimeType=audio/xm;audio/mod;audio/s3m;audio/it;audio/xi;
+Keywords=tracker;music;chiptune;mod;xm;s3m;it;fasttracker;
+StartupNotify=true
