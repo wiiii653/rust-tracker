@@ -1,6 +1,6 @@
 //! Pattern-editing operations built on xmrs's `EditCommand` API.
 //!
-//!  xmrs separates continuous effects (portamento, vibrato, volume slide,
+//! Note: xmrs separates continuous effects (portamento, vibrato, volume slide,
 //! etc.) into `AutomationLane`s rather than storing them on `Cell.effects`.
 //! Only discrete/trigger effects appear in `Cell.effects`.
 
