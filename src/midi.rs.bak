@@ -9,7 +9,7 @@ use std::sync::mpsc;
 #[allow(dead_code)]
 pub struct MidiNoteEvent {
     /// MIDI note number (0-127).
-    pub  u8,
+    pub note: u8,
     /// Velocity (0-127).
     pub velocity: u8,
     /// True if note on, false if note off.
@@ -74,13 +74,13 @@ impl MidiInput {
                     match msg_type {
                         0x90 => {
                             if data2 > 0 {
-                                let _ = tx.send(MidiNoteEvent {  data1, velocity: data2, on: true, channel });
+                                let _ = tx.send(MidiNoteEvent { note: data1, velocity: data2, on: true, channel });
                             } else {
-                                let _ = tx.send(MidiNoteEvent {  data1, velocity: 0, on: false, channel });
+                                let _ = tx.send(MidiNoteEvent { note: data1, velocity: 0, on: false, channel });
                             }
                         }
                         0x80 => {
-                            let _ = tx.send(MidiNoteEvent {  data1, velocity: data2, on: false, channel });
+                            let _ = tx.send(MidiNoteEvent { note: data1, velocity: data2, on: false, channel });
                         }
                         _ => {}
                     }
