@@ -6,6 +6,7 @@ use egui::{Color32, Rect, Sense, Ui, Vec2};
 use xmrs::prelude::LoopType;
 
 /// State for the sample editor.
+#[allow(dead_code)]
 pub struct SampleEditor {
     /// Currently selected instrument index.
     pub current_instrument: usize,

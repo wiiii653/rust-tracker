@@ -69,12 +69,7 @@ pub fn create_empty_module(params: NewModuleParams) -> Result<Module> {
     }];
     module.pitch_wheel_depth = 2;
     module.mix_volume = Volume::FULL;
-
-    // Conditionally set mix_plugins if the feature is enabled
-    #[cfg(feature = "import_it")]
-    {
-        module.mix_plugins = None;
-    }
+    module.mix_plugins = None;
 
     // Create tracks: one per channel per pattern
     let empty_cell = Cell::default();

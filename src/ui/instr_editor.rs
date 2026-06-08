@@ -5,6 +5,7 @@ use egui::{Color32, ScrollArea, Sense, Ui, Vec2};
 use xmrs::prelude::*;
 
 /// The instrument editor widget.
+#[allow(dead_code)]
 pub struct InstrEditor {
     /// Currently selected instrument index.
     pub current_instrument: usize,

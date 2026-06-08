@@ -4,6 +4,7 @@ use xmrs::prelude::*;
 
 /// Extracted sample data ready for display and editing.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SampleData {
     /// Sample name.
     pub name: String,
@@ -99,6 +100,7 @@ impl SampleData {
     }
 
     /// Create a new empty SampleData.
+    #[allow(dead_code)]
     pub fn empty() -> Self {
         SampleData {
             name: String::new(),
@@ -210,6 +212,7 @@ impl SampleData {
     }
 
     /// Trim to region [start, end).
+    #[allow(dead_code)]
     pub fn trim(&mut self, start: usize, end: usize) {
         let end = end.min(self.mono_data.len());
         let start = start.min(end);

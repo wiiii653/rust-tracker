@@ -1,10 +1,9 @@
-#![allow(dead_code)]
-
 use anyhow::{Context, Result};
 use std::path::Path;
 use xmrs::prelude::*;
 
 /// Load a tracker module from disk, auto-detecting format.
+#[allow(dead_code)]
 pub fn load_module(path: &Path) -> Result<Module> {
     let data = std::fs::read(path)
         .with_context(|| format!("Failed to read file: {}", path.display()))?;

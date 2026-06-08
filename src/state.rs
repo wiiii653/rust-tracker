@@ -119,6 +119,14 @@ impl AppState {
     pub fn play(&mut self) -> anyhow::Result<()> {
         self.stop();
 
+        // Keep a display copy of the module for the UI during playback.
+        // The original module moves into the audio thread and is returned on stop.
+        if let Some(ref data) = self.module_data {
+            if let Ok(display_copy) = crate::module::io::load_module_from_bytes(data) {
+                self.module = Some(display_copy);
+            }
+        }
+
         let module = self.module.take().context("No module loaded")?;
         let module_data = self.module_data.clone().context("No module data")?;
 

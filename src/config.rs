@@ -1,7 +1,5 @@
 //! Application configuration — stored in $XDG_CONFIG_HOME/rust-tracker/
 
-#![allow(dead_code)]
-
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

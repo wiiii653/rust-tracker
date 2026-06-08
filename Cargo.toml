@@ -63,4 +63,9 @@ codegen-units = 1
 strip = true
 
 [profile.dev]
-opt-level = 1  # Faster debug builds
+opt-level = 1
+debug = 1  # Line tables only for deps, full for our crate
+
+# Reduce debug info for large dependencies
+[profile.dev.package."*"]
+debug = 0  # No debug info for dependencies

@@ -6,6 +6,7 @@
 
 use crate::module::edit;
 use egui::{Color32, Key, ScrollArea, Sense, Ui, Vec2};
+use xmrs::edit::EditCommand;
 use xmrs::prelude::*;
 
 /// Which column the cursor is in within a cell.
@@ -24,6 +25,7 @@ impl Default for CursorColumn {
 }
 
 /// The pattern editor widget.
+#[allow(dead_code)]
 pub struct PatternEditor {
     /// Current song index.
     pub current_song: usize,
@@ -61,26 +63,35 @@ impl PatternEditor {
     }
 
     /// Render the pattern editor for the given module.
-    /// Returns a list of `EditCommand`s that should be applied.
+    /// Returns EditCommands for any edits made this frame.
     pub fn show(
         &mut self,
         ui: &mut Ui,
         module: &Module,
-    ) {
+    ) -> Vec<EditCommand> {
+        let mut commands = Vec::new();
+
         // Get the pattern layout for the current position
         let pattern_pos = edit::get_pattern_position(module, self.current_song, self.current_order);
 
         if pattern_pos.is_none() {
             ui.label("No pattern data at this position.");
-            return;
+            return commands;
         }
 
         let pattern_pos = pattern_pos.unwrap();
         let num_channels = pattern_pos.tracks.len();
         let num_rows = pattern_pos.num_rows;
 
+        // Clamp cursor to valid range (prevents out-of-bounds after module change)
+        if self.current_channel >= num_channels {
+            self.current_channel = 0;
+        }
+        if self.current_row >= num_rows {
+            self.current_row = 0;
+        }
         // Handle keyboard input
-        self.handle_keyboard_input(ui);
+        self.handle_keyboard_input(ui, &pattern_pos, &mut commands);
 
         // Layout constants
         let row_height = 18.0;
@@ -131,7 +142,14 @@ impl PatternEditor {
                 }
 
                 // --- Draw rows ---
-                for row in 0..num_rows {
+                // Only render visible rows for performance
+                let clip_top = ui.clip_rect().top() - rect.top();
+                let clip_bottom = ui.clip_rect().bottom() - rect.top();
+                let first_visible_row = ((clip_top - header_height) / row_height).max(0.0) as usize;
+                let last_visible_row = ((clip_bottom - header_height) / row_height).ceil() as usize + 1;
+                let last_visible_row = last_visible_row.min(num_rows);
+
+                for row in first_visible_row..last_visible_row {
                     let y = header_height + row as f32 * row_height;
                     let row_rect = egui::Rect::from_min_size(
                         rect.min + Vec2::new(0.0, y),
@@ -141,8 +159,10 @@ impl PatternEditor {
                     // Row background (alternating)
                     let row_bg = if row % 16 == 0 {
                         Color32::from_rgb(30, 30, 40) // beat marker
+                    } else if row == self.current_row && self.edit_mode {
+                        Color32::from_rgb(50, 50, 70) // cursor row (editing)
                     } else if row == self.current_row {
-                        Color32::from_rgb(50, 50, 70) // cursor row
+                        Color32::from_rgb(20, 50, 20) // playing row highlight
                     } else if row % 2 == 0 {
                         Color32::from_rgb(25, 25, 35)
                     } else {
@@ -270,14 +290,17 @@ impl PatternEditor {
                     }
                 }
             });
+
+        commands
     }
 
-    /// Handle keyboard input for navigation and note entry.
-    fn handle_keyboard_input(&mut self, ui: &mut Ui) {
+    fn handle_keyboard_input(
+        &mut self,
+        ui: &mut Ui,
+        pattern_pos: &crate::module::edit::PatternPosition,
+        commands: &mut Vec<EditCommand>,
+    ) {
         let ctx = ui.ctx();
-
-        // Don't process keys if the pattern editor doesn't have focus
-        // (simplified: always process)
 
         ctx.input(|i| {
             for event in &i.events {
@@ -288,7 +311,7 @@ impl PatternEditor {
                         modifiers,
                         ..
                     } => {
-                        self.handle_key(*key, *modifiers);
+                        self.handle_key(*key, *modifiers, pattern_pos, commands);
                     }
                     _ => {}
                 }
@@ -296,7 +319,7 @@ impl PatternEditor {
         });
     }
 
-    fn handle_key(&mut self, key: Key, modifiers: egui::Modifiers) {
+    fn handle_key(&mut self, key: Key, modifiers: egui::Modifiers, pattern_pos: &crate::module::edit::PatternPosition, commands: &mut Vec<EditCommand>) {
         match key {
             // --- Navigation ---
             Key::ArrowUp => {
@@ -350,36 +373,34 @@ impl PatternEditor {
             }
 
             // --- Note input (QWERTY keyboard) ---
-            Key::Z => self.enter_note(0, modifiers), // C
-            Key::S => self.enter_note(1, modifiers), // C#
-            Key::X => self.enter_note(2, modifiers), // D
-            Key::D => self.enter_note(3, modifiers), // D#
-            Key::C => self.enter_note(4, modifiers), // E
-            Key::V => self.enter_note(5, modifiers), // F
-            Key::G => self.enter_note(6, modifiers), // F#
-            Key::B => self.enter_note(7, modifiers), // G
-            Key::H => self.enter_note(8, modifiers), // G#
-            Key::N => self.enter_note(9, modifiers), // A
-            Key::J => self.enter_note(10, modifiers), // A#
-            Key::M => self.enter_note(11, modifiers), // B
+            Key::Z => self.enter_note(0, modifiers, pattern_pos, commands),
+            Key::S => self.enter_note(1, modifiers, pattern_pos, commands),
+            Key::X => self.enter_note(2, modifiers, pattern_pos, commands),
+            Key::D => self.enter_note(3, modifiers, pattern_pos, commands),
+            Key::C => self.enter_note(4, modifiers, pattern_pos, commands),
+            Key::V => self.enter_note(5, modifiers, pattern_pos, commands),
+            Key::G => self.enter_note(6, modifiers, pattern_pos, commands),
+            Key::B => self.enter_note(7, modifiers, pattern_pos, commands),
+            Key::H => self.enter_note(8, modifiers, pattern_pos, commands),
+            Key::N => self.enter_note(9, modifiers, pattern_pos, commands),
+            Key::J => self.enter_note(10, modifiers, pattern_pos, commands),
+            Key::M => self.enter_note(11, modifiers, pattern_pos, commands),
 
-            // Upper octave
-            Key::Q => self.enter_note(12, modifiers), // C (octave up)
-            Key::Num2 => self.enter_note(13, modifiers), // C#
-            Key::W => self.enter_note(14, modifiers), // D
-            Key::Num3 => self.enter_note(15, modifiers), // D#
-            Key::E => self.enter_note(16, modifiers), // E
-            Key::R => self.enter_note(17, modifiers), // F
-            Key::Num5 => self.enter_note(18, modifiers), // F#
-            Key::T => self.enter_note(19, modifiers), // G
-            Key::Num6 => self.enter_note(20, modifiers), // G#
-            Key::Y => self.enter_note(21, modifiers), // A
-            Key::Num7 => self.enter_note(22, modifiers), // A#
-            Key::U => self.enter_note(23, modifiers), // B
+            Key::Q => self.enter_note(12, modifiers, pattern_pos, commands),
+            Key::Num2 => self.enter_note(13, modifiers, pattern_pos, commands),
+            Key::W => self.enter_note(14, modifiers, pattern_pos, commands),
+            Key::Num3 => self.enter_note(15, modifiers, pattern_pos, commands),
+            Key::E => self.enter_note(16, modifiers, pattern_pos, commands),
+            Key::R => self.enter_note(17, modifiers, pattern_pos, commands),
+            Key::Num5 => self.enter_note(18, modifiers, pattern_pos, commands),
+            Key::T => self.enter_note(19, modifiers, pattern_pos, commands),
+            Key::Num6 => self.enter_note(20, modifiers, pattern_pos, commands),
+            Key::Y => self.enter_note(21, modifiers, pattern_pos, commands),
+            Key::Num7 => self.enter_note(22, modifiers, pattern_pos, commands),
+            Key::U => self.enter_note(23, modifiers, pattern_pos, commands),
 
-            // Delete note
             Key::Delete | Key::Backspace => {
-                self.delete_note();
+                self.delete_note(pattern_pos, commands);
             }
 
             // Insert / toggle edit
@@ -462,30 +483,39 @@ impl PatternEditor {
         }
     }
 
-    fn enter_note(&mut self, note_offset: u8, modifiers: egui::Modifiers) {
-        // Calculate the note pitch based on the current octave
-        // In FT2, the base octave is determined by the current keyboard position
-        // For simplicity, use octave 4 (C-4 = 48) as base for lower row, 5 for upper
-        let base_octave = if modifiers.ctrl {
-            5 // Ctrl raises an octave
-        } else {
-            if note_offset >= 12 {
-                5 // Upper row (Q, W, E, R, T, Y, U)
-            } else {
-                4 // Lower row (Z, S, X, D, C, V, G, B, H, N, J, M)
+    fn enter_note(&mut self, note_offset: u8, modifiers: egui::Modifiers, pattern_pos: &crate::module::edit::PatternPosition, commands: &mut Vec<EditCommand>) {
+        let base_octave = if modifiers.ctrl { 5 } else if note_offset >= 12 { 5 } else { 4 };
+        let note_value = (note_offset % 12) + base_octave * 12;
+
+        // Create the note-on event
+        if let Some(pitch) = Pitch::try_from(note_value).ok() {
+            if let Some(track_idx) = pattern_pos.tracks.get(self.current_channel).and_then(|t| *t) {
+                let cell = Cell {
+                    event: CellEvent::NoteOn {
+                        pitch,
+                        velocity: Volume::FULL,
+                    },
+                    effects: vec![],
+                };
+                commands.push(EditCommand::SetCell {
+                    track: track_idx,
+                    row_offset: self.current_row as u32,
+                    content: cell,
+                });
             }
-        };
+        }
 
-        let _note = (note_offset % 12) + base_octave * 12;
-
-        // Create a note-on event
-        // In a real implementation, this would create an EditCommand::SetCell
-        // For now, just advance the cursor
         self.current_row += 1;
         self.edit_mode = true;
     }
 
-    fn delete_note(&mut self) {
-        // Would create EditCommand::SetCell with CellEvent::None
+    fn delete_note(&mut self, pattern_pos: &crate::module::edit::PatternPosition, commands: &mut Vec<EditCommand>) {
+        if let Some(track_idx) = pattern_pos.tracks.get(self.current_channel).and_then(|t| *t) {
+            commands.push(EditCommand::SetCell {
+                track: track_idx,
+                row_offset: self.current_row as u32,
+                content: Cell::default(),
+            });
+        }
     }
 }
