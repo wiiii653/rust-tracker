@@ -6,6 +6,7 @@ use std::sync::mpsc;
 
 /// A MIDI note event ready for the pattern editor.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub struct MidiNoteEvent {
     /// MIDI note number (0-127).
     pub note: u8,

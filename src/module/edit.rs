@@ -166,6 +166,7 @@ fn effect_to_string(effect: &TrackEffect) -> String {
 }
 
 /// Convert an effect string like "A04" back to a TrackEffect (simplified).
+#[allow(dead_code)]
 pub fn parse_effect(s: &str) -> Option<TrackEffect> {
     if s.len() < 3 {
         return None;
@@ -190,5 +191,59 @@ pub fn parse_effect(s: &str) -> Option<TrackEffect> {
             tick: 0,
         }),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::module::create::{create_empty_module, NewModuleParams};
+
+    #[test]
+    fn test_get_pattern_position_created_module() {
+        let params = NewModuleParams {
+            channels: 4,
+            patterns: 2,
+            rows: 64,
+            ..Default::default()
+        };
+        let module = create_empty_module(params).expect("Failed to create module");
+
+        // Check pattern 0
+        let pos = get_pattern_position(&module, 0, 0);
+        assert!(pos.is_some(), "Pattern 0 should exist");
+        let pos = pos.unwrap();
+        assert_eq!(pos.tracks.len(), 4, "Should have 4 channels");
+        assert!(pos.tracks.iter().all(|t| t.is_some()), "All channels should have tracks");
+        assert!(pos.num_rows > 0, "Should have rows");
+
+        // Check pattern 1
+        let pos1 = get_pattern_position(&module, 0, 1);
+        assert!(pos1.is_some(), "Pattern 1 should exist");
+    }
+
+    #[test]
+    fn test_cell_note_display() {
+        let cell = Cell::default();
+        assert_eq!(cell_note_string(&cell), "---");
+
+        let cell = Cell {
+            event: CellEvent::NoteOn {
+                pitch: Pitch::C4,
+                velocity: Volume::FULL,
+            },
+            effects: vec![],
+        };
+        assert_eq!(cell_note_string(&cell), "C-4");
+    }
+
+    #[test]
+    fn test_effect_formatting() {
+        let cell = Cell {
+            event: CellEvent::default(),
+            effects: vec![TrackEffect::Arpeggio { half1: 4, half2: 7 }],
+        };
+        let fx = cell_effects_string(&cell);
+        assert!(fx.contains("047"), "Arpeggio should format as 047, got: {}", fx);
     }
 }

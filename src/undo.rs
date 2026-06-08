@@ -87,6 +87,7 @@ impl UndoManager {
     }
 
     /// Whether undo is available.
+    #[allow(dead_code)]
     pub fn can_undo(&self) -> bool {
         !self.undo_stack.is_empty()
     }

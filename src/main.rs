@@ -86,7 +86,7 @@ fn main() -> anyhow::Result<()> {
 
     // Configure surface
     let window_size = window.inner_size();
-    let surface_config = surface
+    let mut surface_config = surface
         .get_default_config(&adapter, window_size.width, window_size.height)
         .expect("Failed to get default surface config");
     surface.configure(&device, &surface_config);
@@ -118,7 +118,16 @@ fn main() -> anyhow::Result<()> {
 
                 match event {
                     winit::event::WindowEvent::CloseRequested => {
+                        // Save config before exit
+                        if let Err(e) = app.state.config.save() {
+                            log::error!("Failed to save config: {}", e);
+                        }
                         elwt.exit();
+                    }
+                    winit::event::WindowEvent::Resized(new_size) => {
+                        surface_config.width = new_size.width;
+                        surface_config.height = new_size.height;
+                        surface.configure(&device, &surface_config);
                     }
                     winit::event::WindowEvent::RedrawRequested => {
                         let raw_input = egui_winit_state.take_egui_input(&window);
@@ -221,7 +230,10 @@ fn main() -> anyhow::Result<()> {
                 }
             }
             winit::event::Event::AboutToWait => {
-                window.request_redraw();
+                // Only request redraw if playing (for viz updates)
+                if app.state.is_playing() {
+                    window.request_redraw();
+                }
             }
             _ => {}
         }

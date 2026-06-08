@@ -4,8 +4,6 @@
 //! XmrsPlayer. Audio samples are sent to cpal via a lock-free ring buffer.
 //! On stop, the Module is returned to the caller.
 
-#![allow(dead_code)]
-
 use crate::state::VizBuffer;
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -17,6 +15,7 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::thread;
+use std::time::Duration;
 use xmrs::prelude::Module;
 use xmrsplayer::prelude::XmrsPlayer;
 
@@ -42,6 +41,7 @@ pub struct AudioEngine {
     /// Handle for joining the player thread.
     player_thread: Option<thread::JoinHandle<Option<Module>>>,
     /// The raw module bytes, kept so we can re-load.
+    #[allow(dead_code)]
     pub module_data: Option<Vec<u8>>,
 }
 
@@ -92,7 +92,7 @@ impl AudioEngine {
             info!("Playback started: {} Hz, song {}", sample_rate, song);
 
             loop {
-                if stop_for_player.load(Ordering::Relaxed) {
+                if stop_for_player.load(Ordering::Acquire) {
                     info!("Playback stopped by user");
                     break;
                 }
@@ -107,16 +107,16 @@ impl AudioEngine {
                 let right = player.next().unwrap_or(0);
 
                 while producer.try_push(left).is_err() {
-                    if stop_for_player.load(Ordering::Relaxed) {
+                    if stop_for_player.load(Ordering::Acquire) {
                         return Some(module);
                     }
-                    std::hint::spin_loop();
+                    thread::sleep(Duration::from_millis(1));
                 }
                 while producer.try_push(right).is_err() {
-                    if stop_for_player.load(Ordering::Relaxed) {
+                    if stop_for_player.load(Ordering::Acquire) {
                         return Some(module);
                     }
-                    std::hint::spin_loop();
+                    thread::sleep(Duration::from_millis(1));
                 }
 
                 // Push to viz buffer
@@ -198,7 +198,7 @@ impl AudioEngine {
 
     /// Stop playback. Returns the Module if the thread has finished.
     pub fn stop(&mut self) -> Option<Module> {
-        self.stop_flag.store(true, Ordering::SeqCst);
+        self.stop_flag.store(true, Ordering::Release);
 
         // Drop the stream first to stop audio callbacks
         self._stream = None;

@@ -4,6 +4,7 @@ use egui::{ScrollArea, Ui};
 use std::path::{Path, PathBuf};
 
 /// File browser and disk operations panel.
+#[allow(dead_code)]
 pub struct DiskOp {
     /// Current directory being browsed.
     current_dir: PathBuf,
@@ -24,6 +25,7 @@ pub struct DiskOp {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct DirEntry {
     name: String,
     path: PathBuf,

@@ -1,11 +1,10 @@
 //! Order list — displays and navigates the pattern sequence order.
 
-#![allow(dead_code)]
-
 use egui::{Color32, Key, ScrollArea, Sense, Ui, Vec2};
 use xmrs::prelude::*;
 
 /// The order list widget.
+#[allow(dead_code)]
 pub struct OrderList {
     pub current_song: usize,
     pub current_order: usize,
