@@ -2,9 +2,10 @@
 
 use anyhow::Context;
 use crate::audio::engine::{AudioEngine, PlaybackState as AudioPlaybackState};
+use crate::audio::live_edit::{classify_edit_command, LiveEditRoute};
 use crate::config::AppConfig;
 use crate::midi::MidiInput;
-use crate::module::io::ModuleInfo;
+use crate::module::io::{clone_module, ModuleInfo};
 use crate::undo::UndoManager;
 use crate::ui::viz::AudioViz;
 use std::sync::{Arc, Mutex};
@@ -54,6 +55,9 @@ pub struct AppState {
     /// The loaded module, when not playing.
     pub module: Option<Module>,
 
+    /// Revision number for the authoritative module state.
+    pub module_revision: u64,
+
     /// Active audio playback engine, if playing.
     pub audio: Option<AudioEngine>,
 
@@ -87,6 +91,7 @@ impl AppState {
             module_info: None,
             module_data: None,
             module: None,
+            module_revision: 0,
             audio: None,
             playback: Arc::new(Mutex::new(AudioPlaybackState::default())),
             undo: UndoManager::new(),
@@ -99,6 +104,8 @@ impl AppState {
 
     /// Load a module from a file path.
     pub fn load_module(&mut self, path: &std::path::Path) -> anyhow::Result<()> {
+        self.stop();
+
         let data = std::fs::read(path)?;
         let module = crate::module::io::load_module_from_bytes(&data)?;
         let info = ModuleInfo::from_module(&module);
@@ -109,6 +116,7 @@ impl AppState {
         self.module_data = Some(data);
         self.module = Some(module);
         self.module_info = Some(info);
+        self.module_revision = 1;
         self.config.add_recent(path.to_path_buf());
         self.undo.clear();
 
@@ -118,39 +126,63 @@ impl AppState {
     /// Start playback.
     pub fn play(&mut self) -> anyhow::Result<()> {
         self.stop();
-
-        // Keep a display copy of the module for the UI during playback.
-        // The original module moves into the audio thread and is returned on stop.
-        if let Some(ref data) = self.module_data {
-            if let Ok(display_copy) = crate::module::io::load_module_from_bytes(data) {
-                self.module = Some(display_copy);
-            }
-        }
-
-        let module = self.module.take().context("No module loaded")?;
-        let module_data = self.module_data.clone().context("No module data")?;
+        let module = clone_module(self.module.as_ref().context("No module loaded")?)?;
 
         let viz_mix = self.viz_mix.clone();
         let viz_chan = self.viz_channels.clone();
 
-        let engine = AudioEngine::start(module, module_data, 0, viz_mix, viz_chan)?;
+        let engine = AudioEngine::start(
+            module,
+            self.module_revision,
+            0,
+            viz_mix,
+            viz_chan,
+            self.config.amplification,
+        )?;
         self.playback = engine.state.clone();
         self.audio = Some(engine);
 
         Ok(())
     }
 
-    /// Stop playback and recover the Module.
+    /// Stop playback.
     pub fn stop(&mut self) {
         if let Some(mut engine) = self.audio.take() {
-            if let Some(module) = engine.stop() {
-                self.module = Some(module);
-            }
+            engine.stop();
         }
     }
 
     /// Returns true if audio is currently playing.
     pub fn is_playing(&self) -> bool {
         self.audio.is_some()
+    }
+
+    pub fn apply_live_edit(&self, cmd: xmrs::edit::EditCommand) -> anyhow::Result<()> {
+        let policy = classify_edit_command(&cmd);
+        if let Some(ref audio) = self.audio {
+            match policy.route {
+                LiveEditRoute::Queue => audio.apply_edit(self.module_revision, cmd)?,
+                LiveEditRoute::Resync => {
+                    let module = self
+                        .module
+                        .as_ref()
+                        .context("No module available for playback resync")?;
+                    audio.replace_module(self.module_revision, clone_module(module)?)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn sync_playback_module(&self) -> anyhow::Result<()> {
+        if let (Some(audio), Some(module)) = (&self.audio, &self.module) {
+            audio.replace_module(self.module_revision, clone_module(module)?)?;
+        }
+        Ok(())
+    }
+
+    pub fn bump_module_revision(&mut self) -> u64 {
+        self.module_revision = self.module_revision.saturating_add(1);
+        self.module_revision
     }
 }

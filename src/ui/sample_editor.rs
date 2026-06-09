@@ -3,7 +3,7 @@
 
 use crate::module::sample::SampleData;
 use egui::{Color32, Rect, Sense, Ui, Vec2};
-use xmrs::prelude::LoopType;
+use xmrs::prelude::{LoopType, Module};
 
 /// State for the sample editor.
 #[allow(dead_code)]
@@ -98,7 +98,9 @@ impl SampleEditor {
     }
 
     /// Render the sample editor.
-    pub fn show(&mut self, ui: &mut Ui, module: &xmrs::prelude::Module) {
+    pub fn show(&mut self, ui: &mut Ui, module: &mut Module) -> bool {
+        let mut module_changed = false;
+
         // Instrument selector
         ui.horizontal(|ui| {
             ui.label("Instrument:");
@@ -234,6 +236,9 @@ impl SampleEditor {
             if let Some(op) = pending_op {
                 if let Some(ref mut d) = data {
                     op(d);
+                    if self.write_back_sample(module, d) {
+                        module_changed = true;
+                    }
                     self.status = Some("Operation applied".to_string());
                 }
             }
@@ -252,6 +257,23 @@ impl SampleEditor {
 
         // Put data back
         self.sample_data = data;
+        module_changed
+    }
+
+    fn write_back_sample(&self, module: &mut Module, data: &SampleData) -> bool {
+        if let Some(sample) = self.current_sample_mut(module) {
+            data.apply_to_sample(sample);
+            return true;
+        }
+        false
+    }
+
+    fn current_sample_mut<'a>(&self, module: &'a mut Module) -> Option<&'a mut xmrs::prelude::Sample> {
+        let instrument = module.instrument.get_mut(self.current_instrument)?;
+        let xmrs::prelude::InstrumentType::Default(ref mut instr_default) = instrument.instr_type else {
+            return None;
+        };
+        instr_default.sample.get_mut(self.current_sample)?.as_mut()
     }
 }
 

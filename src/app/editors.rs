@@ -37,20 +37,23 @@ impl RustTracker {
             if self.state.is_playing() {
                 let playback = self.state.playback.lock().unwrap();
                 self.pattern_editor.current_row = playback.current_row;
-                // Map playing pattern index to order index via timeline
-                let pat = playback.current_pattern;
-                if let Some(entry) = module.timeline_map.entries.iter()
-                    .find(|e| e.pattern_idx as usize == pat && e.loop_iter == 0 && e.row_idx == 0)
-                {
-                    self.pattern_editor.current_order = entry.order_idx as usize;
-                }
+                self.pattern_editor.current_order = playback.current_order;
             }
             let commands = self.pattern_editor.show(ui, module);
             // Apply edit commands via undo manager
             for cmd in commands {
-                if let Some(ref mut module) = self.state.module {
-                    if let Err(e) = self.state.undo.execute(module, cmd) {
-                        self.error_message = Some(format!("Edit failed: {}", e));
+                let live_cmd = cmd.clone();
+                let result = if let Some(ref mut module) = self.state.module {
+                    self.state.undo.execute(module, cmd)
+                } else {
+                    Ok(())
+                };
+                if let Err(e) = result {
+                    self.error_message = Some(format!("Edit failed: {}", e));
+                } else {
+                    self.state.bump_module_revision();
+                    if let Err(e) = self.state.apply_live_edit(live_cmd) {
+                        self.error_message = Some(format!("Playback sync failed: {}", e));
                     }
                 }
             }
@@ -78,7 +81,8 @@ impl RustTracker {
 
                 if self.state.is_playing() {
                     let playback = self.state.playback.lock().unwrap();
-                    let total_secs = playback.elapsed_samples as f64 / 44100.0;
+                    let sr = if playback.sample_rate > 0 { playback.sample_rate as f64 } else { 44100.0 };
+                    let total_secs = playback.elapsed_samples as f64 / sr;
                     ui.label(egui::RichText::new(format!(
                         "▶ Playing…  Pattern: {:02X}  Row: {:02X}  Time: {:02}:{:02}",
                         playback.current_pattern, playback.current_row,
@@ -100,8 +104,16 @@ impl RustTracker {
     }
 
     pub fn render_sample_editor_app(&mut self, ui: &mut egui::Ui) {
-        if let Some(ref module) = self.state.module {
-            self.sample_editor.show(ui, module);
+        if let Some(ref mut module) = self.state.module {
+            let changed = self.sample_editor.show(ui, module);
+            if changed {
+                self.state.bump_module_revision();
+                if self.state.is_playing() {
+                    if let Err(e) = self.state.sync_playback_module() {
+                        self.error_message = Some(format!("Playback sync failed: {}", e));
+                    }
+                }
+            }
         } else {
             ui.label("No module loaded.");
         }

@@ -15,13 +15,17 @@ struct UndoEntry {
     receipt: xmrs::edit::EditReceipt,
 }
 
+struct RedoEntry {
+    command: EditCommand,
+}
+
 /// The undo/redo manager.
 #[derive(Default)]
 pub struct UndoManager {
     /// Stack of undo entries (most recent last).
     undo_stack: Vec<UndoEntry>,
     /// Stack of redo entries (most recent last).
-    redo_stack: Vec<UndoEntry>,
+    redo_stack: Vec<RedoEntry>,
 }
 
 impl UndoManager {
@@ -57,11 +61,9 @@ impl UndoManager {
             // Undo produces a new receipt; push it to redo
             match module.undo(&entry.receipt) {
                 Ok(()) => {
-                    // The undo itself is in the receipt; we can redo by re-applying
-                    // Actually, xmrs's undo doesn't give us a receipt for the redo.
-                    // We need to store the original command to redo.
-                    // For simplicity, we'll just pop without redo support initially.
-                    self.redo_stack.clear();
+                    self.redo_stack.push(RedoEntry {
+                        command: entry.receipt.command.clone(),
+                    });
                     Ok(true)
                 }
                 Err(e) => {
@@ -76,18 +78,24 @@ impl UndoManager {
     }
 
     /// Redo the last undone action. Returns true if something was redone.
-    pub fn redo(&mut self, _module: &mut Module) -> Result<bool, String> {
-        // xmrs's undo/redo is asymmetric: Module::undo consumes the receipt
-        // but doesn't produce a new receipt for redo-applying.
-        // For now, redo is not supported. We'd need to store the original command.
-        if !self.redo_stack.is_empty() {
-            self.redo_stack.clear();
+    pub fn redo(&mut self, module: &mut Module) -> Result<bool, String> {
+        if let Some(entry) = self.redo_stack.pop() {
+            match module.apply(entry.command) {
+                Ok(receipt) => {
+                    self.undo_stack.push(UndoEntry { receipt });
+                    Ok(true)
+                }
+                Err(e) => {
+                    Err(format!("Redo failed: {:?}", e))
+                }
+            }
+        } else {
+            Ok(false)
         }
-        Ok(false)
     }
 
     /// Whether undo is available.
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "useful for UI feedback like menu item enablement")]
     pub fn can_undo(&self) -> bool {
         !self.undo_stack.is_empty()
     }
@@ -106,5 +114,45 @@ impl UndoManager {
     /// Number of undo steps available.
     pub fn undo_depth(&self) -> usize {
         self.undo_stack.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use xmrs::prelude::{Cell, CellEvent, Pitch, Volume};
+
+    #[test]
+    fn redo_reapplies_last_undone_command() {
+        let mut module = Module::default();
+        module.tracks.push(Track::Notes {
+            name: "Track 1".to_string(),
+            instrument: 0,
+            rows: vec![Cell::default()],
+            muted: false,
+        });
+
+        let command = EditCommand::SetCell {
+            track: 0,
+            row_offset: 0,
+            content: Cell {
+                event: CellEvent::NoteOn {
+                    pitch: Pitch::C4,
+                    velocity: Volume::FULL,
+                },
+                effects: vec![],
+            },
+        };
+
+        let mut undo = UndoManager::new();
+        undo.execute(&mut module, command).expect("apply edit");
+        undo.undo(&mut module).expect("undo edit");
+        assert!(undo.can_redo(), "redo should be available after undo");
+
+        let redid = undo.redo(&mut module).expect("redo edit");
+        assert!(redid, "redo should report a successful replay");
+
+        let cell = module.tracks[0].cell_at(0);
+        assert!(matches!(cell.event, CellEvent::NoteOn { pitch: Pitch::C4, .. }));
     }
 }

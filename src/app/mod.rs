@@ -11,7 +11,7 @@ use crate::ui::instr_editor::InstrEditor;
 use crate::ui::order_list::OrderList;
 use crate::ui::pattern_editor::PatternEditor;
 use crate::ui::sample_editor::SampleEditor;
-use crate::ui::theme;
+use crate::ui::theme::{self, Theme};
 use egui::{CentralPanel, Color32, Key, SidePanel, TopBottomPanel};
 use log::info;
 use std::path::PathBuf;
@@ -29,9 +29,6 @@ pub enum EditorView {
 /// The top-level application struct.
 pub struct RustTracker {
     pub state: AppState,
-    /// File to open on startup (from CLI argument).
-    #[allow(dead_code)]
-    startup_file: Option<PathBuf>,
     /// Error message to display (cleared after one frame).
     pub error_message: Option<String>,
     /// Status message to display (cleared after one frame).
@@ -56,10 +53,12 @@ pub struct RustTracker {
     pub show_new_dialog: bool,
     /// Parameters for new module dialog.
     pub new_module_params: NewModuleParams,
-    /// Current theme (0 = not applied, 1 = FT2, 2 = modern, 255 = already applied).
-    pub current_theme: u8,
+    /// Current theme. `None` means the initial theme hasn't been applied yet (first frame).
+    pub current_theme: Option<Theme>,
     /// Window title for display.
     window_title: String,
+    /// Request a graceful app shutdown from UI code.
+    pub quit_requested: bool,
 }
 
 impl RustTracker {
@@ -90,7 +89,6 @@ impl RustTracker {
 
         Self {
             state,
-            startup_file,
             error_message: error,
             status_message: status,
             pending_file: None,
@@ -103,17 +101,18 @@ impl RustTracker {
             show_help: false,
             show_new_dialog: false,
             new_module_params: NewModuleParams::default(),
-            current_theme: 0,
+            current_theme: None,
             window_title: "rust-tracker".to_string(),
+            quit_requested: false,
         }
     }
 
     /// Called every frame by the egui integration.
     pub fn update(&mut self, ctx: &egui::Context) {
-        // Apply theme on first frame only
-        if self.current_theme == 0 {
+        // Apply default theme on first frame only
+        if self.current_theme.is_none() {
             theme::apply_ft2_classic(ctx);
-            self.current_theme = 255;
+            self.current_theme = Some(Theme::Ft2Classic);
         }
 
         // Update window title
@@ -143,6 +142,8 @@ impl RustTracker {
                 if event.on && event.velocity > 0 {
                     // Convert MIDI note to internal pitch and enter it
                     if let Ok(pitch) = xmrs::prelude::Pitch::try_from(event.note) {
+                        let mut pending_live_cmd = None;
+                        let mut edit_failed = None;
                         if let Some(ref mut module) = self.state.module {
                             if let Some(pat_pos) = crate::module::edit::get_pattern_position(
                                 module,
@@ -168,12 +169,25 @@ impl RustTracker {
                                         row_offset: self.pattern_editor.current_row as u32,
                                         content: cell,
                                     };
+                                    let live_cmd = cmd.clone();
                                     if let Err(e) = self.state.undo.execute(module, cmd) {
-                                        self.error_message = Some(format!("MIDI edit: {}", e));
+                                        edit_failed = Some(format!("MIDI edit: {}", e));
                                     } else {
-                                        self.pattern_editor.current_row += 1;
+                                        self.state.bump_module_revision();
+                                        pending_live_cmd = Some(live_cmd);
                                     }
                                 }
+                            }
+                        }
+
+                        if let Some(err) = edit_failed {
+                            self.error_message = Some(err);
+                        } else if let Some(live_cmd) = pending_live_cmd {
+                            if let Err(e) = self.state.apply_live_edit(live_cmd) {
+                                self.error_message =
+                                    Some(format!("Playback sync failed: {}", e));
+                            } else {
+                                self.pattern_editor.current_row += 1;
                             }
                         }
                     }
@@ -272,18 +286,34 @@ impl RustTracker {
     fn handle_global_keys(&mut self, ctx: &egui::Context) {
         ctx.input(|i| {
             if i.key_pressed(Key::Z) && i.modifiers.ctrl && !i.modifiers.shift {
-                if let Some(ref mut module) = self.state.module {
-                    if let Err(e) = self.state.undo.undo(module) {
-                        self.error_message = Some(format!("Undo failed: {}", e));
+                let result = if let Some(ref mut module) = self.state.module {
+                    self.state.undo.undo(module)
+                } else {
+                    Ok(false)
+                };
+                if let Err(e) = result {
+                    self.error_message = Some(format!("Undo failed: {}", e));
+                } else {
+                    self.state.bump_module_revision();
+                    if let Err(e) = self.state.sync_playback_module() {
+                        self.error_message = Some(format!("Playback sync failed: {}", e));
                     }
                 }
             }
             if (i.key_pressed(Key::Y) && i.modifiers.ctrl)
                 || (i.key_pressed(Key::Z) && i.modifiers.ctrl && i.modifiers.shift)
             {
-                if let Some(ref mut module) = self.state.module {
-                    if let Err(e) = self.state.undo.redo(module) {
-                        self.error_message = Some(format!("Redo failed: {}", e));
+                let result = if let Some(ref mut module) = self.state.module {
+                    self.state.undo.redo(module)
+                } else {
+                    Ok(false)
+                };
+                if let Err(e) = result {
+                    self.error_message = Some(format!("Redo failed: {}", e));
+                } else {
+                    self.state.bump_module_revision();
+                    if let Err(e) = self.state.sync_playback_module() {
+                        self.error_message = Some(format!("Playback sync failed: {}", e));
                     }
                 }
             }
@@ -306,6 +336,9 @@ impl RustTracker {
             }
             if i.key_pressed(Key::N) && i.modifiers.ctrl && !i.modifiers.shift {
                 self.show_new_dialog = true;
+            }
+            if i.key_pressed(Key::Q) && i.modifiers.ctrl && !i.modifiers.shift {
+                self.quit_requested = true;
             }
 
             // View switching: Ctrl+1..5

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use bincode;
 use std::path::Path;
 use xmrs::prelude::*;
 
@@ -13,6 +14,17 @@ pub fn load_module(path: &Path) -> Result<Module> {
 /// Load a module from in-memory bytes.
 pub fn load_module_from_bytes(data: &[u8]) -> Result<Module> {
     Module::load(data).map_err(|e| anyhow::anyhow!("Failed to load module: {:?}", e))
+}
+
+/// Deep-clone a module through bincode round-trip.
+///
+/// `xmrs::prelude::Module` does not implement `Clone`, but it is
+/// serializable. This is primarily used to give the audio thread its
+/// own owned playback copy while the UI keeps the editable module.
+/// We use bincode for speed (vs. JSON) since this runs on play/resync.
+pub fn clone_module(module: &Module) -> Result<Module> {
+    let data = bincode::serialize(module).context("Failed to serialize module for cloning")?;
+    bincode::deserialize(&data).context("Failed to deserialize module clone")
 }
 
 /// Info about a loaded module (extracted for display).

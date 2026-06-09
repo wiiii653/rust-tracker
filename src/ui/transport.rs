@@ -82,7 +82,8 @@ impl TransportBar {
             ui.separator();
 
             // Time elapsed
-            let total_seconds = playback.elapsed_samples as f64 / 44100.0; // approximate
+            let sr = if playback.sample_rate > 0 { playback.sample_rate as f64 } else { 44100.0 };
+            let total_seconds = playback.elapsed_samples as f64 / sr;
             let minutes = total_seconds as u64 / 60;
             let seconds = total_seconds as u64 % 60;
             ui.label(

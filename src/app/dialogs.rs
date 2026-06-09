@@ -155,10 +155,12 @@ impl RustTracker {
                     if ui.button("Create").clicked() {
                         match create::create_empty_module(self.new_module_params.clone()) {
                             Ok(module) => {
+                                self.state.stop();
                                 let info = ModuleInfo::from_module(&module);
                                 self.state.module = Some(module);
                                 self.state.module_info = Some(info);
                                 self.state.module_data = Some(Vec::new());
+                                self.state.module_revision = 1;
                                 self.state.undo.clear();
                                 self.status_message = Some(format!(
                                     "Created: {} ({} ch, {} patterns)",

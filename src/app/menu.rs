@@ -1,7 +1,7 @@
 //! Menu bar rendering.
 
 use crate::app::RustTracker;
-use crate::ui::theme;
+use crate::ui::theme::{self, Theme};
 
 impl RustTracker {
     pub fn render_menu_bar_app(&mut self, ui: &mut egui::Ui) {
@@ -60,7 +60,8 @@ impl RustTracker {
                 }
 
                 if ui.button("Quit").clicked() {
-                    std::process::exit(0);
+                    self.quit_requested = true;
+                    ui.close_menu();
                 }
             });
 
@@ -112,12 +113,12 @@ impl RustTracker {
                 ui.separator();
                 if ui.button("FT2 Classic Theme").clicked() {
                     theme::apply_ft2_classic(ui.ctx());
-                    self.current_theme = 1;
+                    self.current_theme = Some(Theme::Ft2Classic);
                     ui.close_menu();
                 }
                 if ui.button("Modern Dark Theme").clicked() {
                     theme::apply_modern_dark(ui.ctx());
-                    self.current_theme = 2;
+                    self.current_theme = Some(Theme::ModernDark);
                     ui.close_menu();
                 }
                 ui.separator();

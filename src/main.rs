@@ -135,6 +135,14 @@ fn main() -> anyhow::Result<()> {
                             app.update(ctx);
                         });
 
+                        if app.quit_requested {
+                            if let Err(e) = app.state.config.save() {
+                                log::error!("Failed to save config: {}", e);
+                            }
+                            elwt.exit();
+                            return;
+                        }
+
                         egui_winit_state.handle_platform_output(
                             &window,
                             full_output.platform_output,
