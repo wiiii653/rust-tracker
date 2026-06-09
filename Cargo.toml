@@ -32,6 +32,9 @@ clap = { version = "4", features = ["derive"] }
 # Native file dialogs
 rfd = "0.15"
 
+# Image loading for window background
+image = "0.25"
+
 # Error handling
 anyhow = "1"
 thiserror = "2"
