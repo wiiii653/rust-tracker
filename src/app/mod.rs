@@ -438,14 +438,47 @@ impl RustTracker {
         }
     }
 
-    /// Paint the background image within the given ui's max rect.
+    /// Paint the background image within the given ui's max rect,
+    /// cropped to center (cover fit) rather than stretched.
     fn paint_central_bg(&self, ui: &mut egui::Ui) {
-        if let Some(ref tex) = self.bg_texture {
+        if let (Some(ref tex), Some((_, img_w, img_h))) = (&self.bg_texture, &self.bg_image_data) {
             let rect = ui.max_rect();
+            let rw = rect.width();
+            let rh = rect.height();
+            if rw <= 0.0 || rh <= 0.0 {
+                return;
+            }
+            let iw = *img_w as f32;
+            let ih = *img_h as f32;
+            let rect_aspect = rw / rh;
+            let img_aspect = iw / ih;
+
+            // Compute UV rect that crops the image to center so it covers
+            // the destination rect while preserving aspect ratio.
+            let uv = if rect_aspect > img_aspect {
+                // Window is wider than image — crop top/bottom
+                let visible_frac = img_aspect / rect_aspect;
+                let v_min = 0.5 - visible_frac * 0.5;
+                let v_max = 0.5 + visible_frac * 0.5;
+                egui::Rect::from_min_max(
+                    egui::pos2(0.0, v_min),
+                    egui::pos2(1.0, v_max),
+                )
+            } else {
+                // Window is taller than image — crop left/right
+                let visible_frac = rect_aspect / img_aspect;
+                let u_min = 0.5 - visible_frac * 0.5;
+                let u_max = 0.5 + visible_frac * 0.5;
+                egui::Rect::from_min_max(
+                    egui::pos2(u_min, 0.0),
+                    egui::pos2(u_max, 1.0),
+                )
+            };
+
             ui.painter().image(
                 tex.id(),
                 rect,
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                uv,
                 egui::Color32::from_rgba_unmultiplied(255, 255, 255, 12), // ~5% opacity — barely visible watermark
             );
         }

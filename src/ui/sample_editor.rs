@@ -5,6 +5,15 @@ use crate::module::sample::SampleData;
 use egui::{Color32, Rect, Sense, Ui, Vec2};
 use xmrs::prelude::{LoopType, Module};
 
+/// Which loop marker is being dragged on the waveform.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DragMarker {
+    LoopStart,
+    LoopEnd,
+    SustainStart,
+    SustainEnd,
+}
+
 /// State for the sample editor.
 #[allow(dead_code)]
 pub struct SampleEditor {
@@ -24,6 +33,12 @@ pub struct SampleEditor {
     pub sample_data: Option<SampleData>,
     /// Pending operation name for status display.
     pub status: Option<String>,
+    /// Which loop marker is currently being dragged.
+    drag_marker: Option<DragMarker>,
+    /// Trim range start (sample frames).
+    trim_start: usize,
+    /// Trim range end (sample frames).
+    trim_end: usize,
 }
 
 impl SampleEditor {
@@ -37,6 +52,9 @@ impl SampleEditor {
             editing_loop: false,
             sample_data: None,
             status: None,
+            drag_marker: None,
+            trim_start: 0,
+            trim_end: 0,
         }
     }
 
@@ -143,6 +161,16 @@ impl SampleEditor {
                         }
                     }
                 });
+
+            // Slot management buttons
+            if ui.button("+ Slot").clicked() {
+                self.add_sample_slot(module);
+                module_changed = true;
+            }
+            if ui.button("− Slot").clicked() {
+                self.remove_sample_slot(module);
+                module_changed = true;
+            }
         });
 
         ui.separator();
@@ -155,8 +183,9 @@ impl SampleEditor {
         // Take ownership of sample_data to avoid borrow conflicts
         let mut data = self.sample_data.take();
         let mut pending_op: Option<fn(&mut SampleData)> = None;
+        let mut pending_wav_data: Option<SampleData> = None;
 
-        if let Some(ref sample) = data {
+        if let Some(ref mut sample) = data {
             // Sample info
             ui.horizontal(|ui| {
                 ui.label(format!(
@@ -185,6 +214,29 @@ impl SampleEditor {
                 }
                 if ui.button("1:1").clicked() {
                     self.zoom = 1.0;
+                }
+            });
+
+            // WAV import button
+            ui.horizontal(|ui| {
+                if ui.button("📂 Load WAV…").clicked() {
+                    if let Some(wav_path) = rfd::FileDialog::new()
+                        .add_filter("WAV Files", &["wav", "wave"])
+                        .pick_file()
+                    {
+                        match SampleData::from_wav_path(&wav_path) {
+                            Ok(wav_data) => {
+                                self.status = Some(format!(
+                                    "Loaded: {}",
+                                    wav_path.file_name().unwrap_or_default().to_string_lossy()
+                                ));
+                                pending_wav_data = Some(wav_data);
+                            }
+                            Err(e) => {
+                                self.status = Some(format!("WAV error: {}", e));
+                            }
+                        }
+                    }
                 }
             });
 
@@ -224,6 +276,7 @@ impl SampleEditor {
                 sample,
                 self.zoom,
                 self.scroll_offset,
+                &mut self.drag_marker,
             );
             self.zoom = zoom_changed.0;
             self.scroll_offset = zoom_changed.1;
@@ -231,6 +284,61 @@ impl SampleEditor {
             // Loop point display
             ui.separator();
             draw_loop_info(ui, sample);
+
+            // Loop type selectors
+            ui.horizontal(|ui| {
+                ui.label("Loop:");
+                egui::ComboBox::from_id_salt("loop_type_combo")
+                    .selected_text(format!("{:?}", sample.loop_type))
+                    .show_ui(ui, |ui| {
+                        for lt in &[LoopType::No, LoopType::Forward, LoopType::PingPong] {
+                            if ui.selectable_label(sample.loop_type == *lt, format!("{:?}", lt)).clicked() {
+                                sample.loop_type = *lt;
+                            }
+                        }
+                    });
+                ui.label("Sustain:");
+                egui::ComboBox::from_id_salt("sustain_loop_type_combo")
+                    .selected_text(format!("{:?}", sample.sustain_loop_type))
+                    .show_ui(ui, |ui| {
+                        for lt in &[LoopType::No, LoopType::Forward, LoopType::PingPong] {
+                            if ui.selectable_label(sample.sustain_loop_type == *lt, format!("{:?}", lt)).clicked() {
+                                sample.sustain_loop_type = *lt;
+                            }
+                        }
+                    });
+            });
+
+            // Trim controls
+            ui.horizontal(|ui| {
+                ui.label("Trim:");
+                if self.trim_end == 0 || self.trim_end > sample.length {
+                    self.trim_end = sample.length;
+                }
+                if ui.add(egui::DragValue::new(&mut self.trim_start)
+                    .range(0..=sample.length.saturating_sub(1))
+                    .speed(100.0))
+                    .changed() {}
+                ui.label("–");
+                if ui.add(egui::DragValue::new(&mut self.trim_end)
+                    .range(1..=sample.length)
+                    .speed(100.0))
+                    .changed() {}
+                if ui.button("✂ Trim").clicked()
+                    && self.trim_start < self.trim_end
+                {
+                    sample.trim(self.trim_start, self.trim_end);
+                    if self.write_back_sample(module, sample) {
+                        module_changed = true;
+                    }
+                    self.status = Some("Trim applied".to_string());
+                    self.trim_end = sample.length;
+                }
+                if ui.button("↺ Reset").clicked() {
+                    self.trim_start = 0;
+                    self.trim_end = sample.length;
+                }
+            });
 
             // Apply pending operation
             if let Some(op) = pending_op {
@@ -255,6 +363,24 @@ impl SampleEditor {
             ui.label("No sample selected or instrument has no samples.");
         }
 
+        // Process pending WAV import (handled outside if-let to avoid borrow conflict)
+        if let Some(wav_data) = pending_wav_data.take() {
+            if self.write_back_sample(module, &wav_data) {
+                module_changed = true;
+            }
+            self.zoom = 100.0;
+            self.scroll_offset = 0.0;
+            data = Some(wav_data);
+        }
+
+        // Sync sample metadata changes (loop type, markers, etc.) back to module.
+        // This is cheap metadata-only when PCM data hasn't changed.
+        if let Some(ref d) = data {
+            if self.write_back_sample(module, d) {
+                module_changed = true;
+            }
+        }
+
         // Put data back
         self.sample_data = data;
         module_changed
@@ -268,21 +394,88 @@ impl SampleEditor {
         false
     }
 
+    /// Get mutable reference to the current sample, auto-creating the slot if needed.
     fn current_sample_mut<'a>(&self, module: &'a mut Module) -> Option<&'a mut xmrs::prelude::Sample> {
         let instrument = module.instrument.get_mut(self.current_instrument)?;
         let xmrs::prelude::InstrumentType::Default(ref mut instr_default) = instrument.instr_type else {
             return None;
         };
-        instr_default.sample.get_mut(self.current_sample)?.as_mut()
+        // Ensure the sample vec has enough slots
+        while instr_default.sample.len() <= self.current_sample {
+            instr_default.sample.push(None);
+        }
+        // Create a default sample if the slot is empty
+        if instr_default.sample[self.current_sample].is_none() {
+            use xmrs::prelude::*;
+            instr_default.sample[self.current_sample] = Some(Sample {
+                name: String::new(),
+                relative_pitch: 0,
+                finetune: Finetune::ZERO,
+                volume: ChannelVolume::from_byte_64(64),
+                default_note_volume: Volume::FULL,
+                panning: Panning::CENTER,
+                loop_flag: LoopType::No,
+                loop_start: 0,
+                loop_length: 0,
+                sustain_loop_flag: LoopType::No,
+                sustain_loop_start: 0,
+                sustain_loop_length: 0,
+                data: None,
+            });
+        }
+        instr_default.sample[self.current_sample].as_mut()
+    }
+
+    /// Add a new empty sample slot to the current instrument and select it.
+    fn add_sample_slot(&mut self, module: &mut Module) {
+        use xmrs::prelude::*;
+        if let Some(instrument) = module.instrument.get_mut(self.current_instrument) {
+            if let InstrumentType::Default(ref mut instr) = instrument.instr_type {
+                instr.sample.push(Some(Sample {
+                    name: String::new(),
+                    relative_pitch: 0,
+                    finetune: Finetune::ZERO,
+                    volume: ChannelVolume::from_byte_64(64),
+                    default_note_volume: Volume::FULL,
+                    panning: Panning::CENTER,
+                    loop_flag: LoopType::No,
+                    loop_start: 0,
+                    loop_length: 0,
+                    sustain_loop_flag: LoopType::No,
+                    sustain_loop_start: 0,
+                    sustain_loop_length: 0,
+                    data: None,
+                }));
+                self.current_sample = instr.sample.len() - 1;
+                self.load_sample(module, self.current_instrument, self.current_sample);
+            }
+        }
+    }
+
+    /// Remove the current sample slot from the instrument.
+    fn remove_sample_slot(&mut self, module: &mut Module) {
+        if let Some(instrument) = module.instrument.get_mut(self.current_instrument) {
+            if let xmrs::prelude::InstrumentType::Default(ref mut instr) = instrument.instr_type {
+                if instr.sample.is_empty() || self.current_sample >= instr.sample.len() {
+                    return;
+                }
+                instr.sample.remove(self.current_sample);
+                if self.current_sample >= instr.sample.len() {
+                    self.current_sample = instr.sample.len().saturating_sub(1);
+                }
+                self.load_sample(module, self.current_instrument, self.current_sample);
+            }
+        }
     }
 }
 
 /// Draw the waveform visualization. Returns (new_zoom, new_scroll_offset).
 fn draw_waveform(
     ui: &mut Ui,
-    data: &SampleData,
+    data: &mut SampleData,
     mut zoom: f32,
     mut scroll_offset: f32,
+    drag_marker: &mut Option<DragMarker>,
 ) -> (f32, f32) {
     if data.mono_data.is_empty() {
         ui.label("Empty sample.");
@@ -305,14 +498,6 @@ fn draw_waveform(
         [rect.left_center(), rect.right_center()],
         egui::Stroke::new(1.0, Color32::from_rgb(40, 40, 60)),
     );
-
-    // Handle scroll with drag
-    if response.dragged() {
-        scroll_offset -= response.drag_delta().x * zoom;
-        if scroll_offset < 0.0 {
-            scroll_offset = 0.0;
-        }
-    }
 
     // Zoom with mouse wheel
     if let Some(hover_pos) = response.hover_pos() {
@@ -385,6 +570,15 @@ fn draw_waveform(
         }
     }
 
+    // Helper: convert screen x to sample position
+    let x_to_sample = |x: f32| -> u32 {
+        let sample = (start_sample as f32 + (x - rect.left()) * samples_per_pixel) as i64;
+        sample.clamp(0, data.length.saturating_sub(1) as i64) as u32
+    };
+
+    // Collect visible marker positions for hit-testing
+    let mut marker_positions: Vec<(f32, DragMarker)> = Vec::new();
+
     // Draw loop points
     if data.loop_type != LoopType::No {
         let loop_start_x = rect.left()
@@ -395,6 +589,7 @@ fn draw_waveform(
             - start_sample as f32 / samples_per_pixel;
 
         if loop_start_x >= rect.left() && loop_start_x <= rect.right() {
+            marker_positions.push((loop_start_x, DragMarker::LoopStart));
             painter.line_segment(
                 [
                     egui::pos2(loop_start_x, rect.top()),
@@ -404,6 +599,7 @@ fn draw_waveform(
             );
         }
         if loop_end_x >= rect.left() && loop_end_x <= rect.right() {
+            marker_positions.push((loop_end_x, DragMarker::LoopEnd));
             painter.line_segment(
                 [
                     egui::pos2(loop_end_x, rect.top()),
@@ -424,6 +620,7 @@ fn draw_waveform(
             - start_sample as f32 / samples_per_pixel;
 
         if sus_start_x >= rect.left() && sus_start_x <= rect.right() {
+            marker_positions.push((sus_start_x, DragMarker::SustainStart));
             painter.line_segment(
                 [
                     egui::pos2(sus_start_x, rect.top()),
@@ -433,12 +630,73 @@ fn draw_waveform(
             );
         }
         if sus_end_x >= rect.left() && sus_end_x <= rect.right() {
+            marker_positions.push((sus_end_x, DragMarker::SustainEnd));
             painter.line_segment(
                 [
                     egui::pos2(sus_end_x, rect.top()),
                     egui::pos2(sus_end_x, rect.bottom()),
                 ],
                 egui::Stroke::new(1.5, Color32::from_rgb(100, 200, 255)),
+            );
+        }
+    }
+
+    // Handle drag: marker dragging vs waveform scrolling
+    let hit_radius = 10.0;
+    if response.dragged() {
+        if let Some(pointer) = response.hover_pos() {
+            if let Some(drag) = *drag_marker {
+                // Update the marker being dragged
+                let sample_pos = x_to_sample(pointer.x);
+                match drag {
+                    DragMarker::LoopStart => {
+                        let max_start = data.loop_start + data.loop_length.saturating_sub(1);
+                        data.loop_start = sample_pos.min(max_start);
+                    }
+                    DragMarker::LoopEnd => {
+                        let min_end = data.loop_start.saturating_add(1);
+                        data.loop_length = sample_pos.max(min_end) - data.loop_start;
+                    }
+                    DragMarker::SustainStart => {
+                        let max_start = data.sustain_loop_start + data.sustain_loop_length.saturating_sub(1);
+                        data.sustain_loop_start = sample_pos.min(max_start);
+                    }
+                    DragMarker::SustainEnd => {
+                        let min_end = data.sustain_loop_start.saturating_add(1);
+                        data.sustain_loop_length = sample_pos.max(min_end) - data.sustain_loop_start;
+                    }
+                }
+            } else {
+                // Check if dragging started near a marker
+                let nearest = marker_positions.iter()
+                    .filter(|(mx, _)| (pointer.x - mx).abs() < hit_radius)
+                    .min_by(|(a, _), (b, _)| (pointer.x - a).abs().total_cmp(&(pointer.x - b).abs()));
+
+                if let Some((_, marker)) = nearest {
+                    *drag_marker = Some(*marker);
+                } else {
+                    // Scroll waveform
+                    scroll_offset -= response.drag_delta().x * zoom;
+                    if scroll_offset < 0.0 {
+                        scroll_offset = 0.0;
+                    }
+                }
+            }
+        }
+    } else {
+        // Not dragging — clear drag state
+        *drag_marker = None;
+    }
+
+    // Highlight hovered marker with a slightly brighter stroke
+    if let Some(pointer) = response.hover_pos() {
+        let nearest = marker_positions.iter()
+            .filter(|(mx, _)| (pointer.x - mx).abs() < hit_radius)
+            .min_by(|(a, _), (b, _)| (pointer.x - a).abs().total_cmp(&(pointer.x - b).abs()));
+        if let Some((mx, _)) = nearest {
+            painter.line_segment(
+                [egui::pos2(*mx, rect.top()), egui::pos2(*mx, rect.bottom())],
+                egui::Stroke::new(3.0, egui::Color32::WHITE),
             );
         }
     }
