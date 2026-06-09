@@ -25,8 +25,15 @@ impl OrderList {
     pub fn show(&mut self, ui: &mut Ui, module: &Module) -> Option<usize> {
         let mut new_order = None;
 
-        // Get the order count for the current song
-        let order_count = module.timeline_map.order_count(self.current_song);
+        let order_entries: Vec<_> = module
+            .timeline_map
+            .entries
+            .iter()
+            .filter(|e| {
+                e.song as usize == self.current_song && e.loop_iter == 0 && e.row_idx == 0
+            })
+            .collect();
+        let order_count = order_entries.len();
 
         // Handle keyboard
         ui.ctx().input(|i| {
@@ -66,7 +73,7 @@ impl OrderList {
         let cols = 16;
         let rows = (order_count + cols - 1) / cols;
         let total_width = cols as f32 * cell_size;
-        let total_height = rows.max(1) as f32 * cell_size;
+        let total_height = (rows.max(1) + 1) as f32 * cell_size;
 
         ScrollArea::vertical()
             .id_salt("order_list_scroll")
@@ -88,13 +95,7 @@ impl OrderList {
                     Color32::LIGHT_GRAY,
                 );
 
-                for (i, entry) in module
-                    .timeline_map
-                    .entries
-                    .iter()
-                    .filter(|e| e.song as usize == self.current_song && e.loop_iter == 0)
-                    .enumerate()
-                {
+                for (i, entry) in order_entries.iter().enumerate() {
                     let col = i % cols;
                     let row = i / cols + 1; // +1 for header
 

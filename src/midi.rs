@@ -6,15 +6,15 @@ use std::sync::mpsc;
 
 /// A MIDI note event ready for the pattern editor.
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)]
 pub struct MidiNoteEvent {
     /// MIDI note number (0-127).
-    pub  u8,
+    pub note: u8,
     /// Velocity (0-127).
     pub velocity: u8,
     /// True if note on, false if note off.
     pub on: bool,
     /// MIDI channel (0-15).
+    #[expect(dead_code, reason = "useful for future multi-channel routing")]
     pub channel: u8,
 }
 
@@ -26,6 +26,8 @@ pub struct MidiInput {
     pub enabled: bool,
     /// Name of connected device (if any).
     pub device_name: Option<String>,
+    /// Kept alive while connected (type-erased closure). Dropped on disconnect or drop.
+    _connection: Option<Box<dyn std::any::Any + Send>>,
 }
 
 impl MidiInput {
@@ -34,6 +36,7 @@ impl MidiInput {
             receiver: None,
             enabled: false,
             device_name: None,
+            _connection: None,
         }
     }
 
@@ -59,9 +62,9 @@ impl MidiInput {
         let port_name = midi_in.port_name(&port).unwrap_or_else(|_| "Unknown".to_string());
         let (tx, rx) = mpsc::channel();
 
-        // Keep connection alive (leak is intentional — MIDI runs for app lifetime)
-        // We must use map_err because the ConnectError doesn't implement Sync
-        let _conn = midi_in.connect(
+        // Connect and keep the connection alive by storing it in self.
+        // If there was a previous connection, dropping it disconnects cleanly.
+        let conn = midi_in.connect(
             &port,
             "rust-tracker-midi",
             move |_timestamp, message, _| {
@@ -74,13 +77,28 @@ impl MidiInput {
                     match msg_type {
                         0x90 => {
                             if data2 > 0 {
-                                let _ = tx.send(MidiNoteEvent {  data1, velocity: data2, on: true, channel });
+                                let _ = tx.send(MidiNoteEvent {
+                                    note: data1,
+                                    velocity: data2,
+                                    on: true,
+                                    channel,
+                                });
                             } else {
-                                let _ = tx.send(MidiNoteEvent {  data1, velocity: 0, on: false, channel });
+                                let _ = tx.send(MidiNoteEvent {
+                                    note: data1,
+                                    velocity: 0,
+                                    on: false,
+                                    channel,
+                                });
                             }
                         }
                         0x80 => {
-                            let _ = tx.send(MidiNoteEvent {  data1, velocity: data2, on: false, channel });
+                            let _ = tx.send(MidiNoteEvent {
+                                note: data1,
+                                velocity: data2,
+                                on: false,
+                                channel,
+                            });
                         }
                         _ => {}
                     }
@@ -89,8 +107,7 @@ impl MidiInput {
             |err: &midir::ConnectError<midir::MidiInput>| { warn!("MIDI error: {}", err); },
         ).map_err(|e| anyhow::anyhow!("MIDI connect error: {:?}", e))?;
 
-        std::mem::forget(_conn);
-
+        self._connection = Some(Box::new(conn));
         self.receiver = Some(rx);
         self.device_name = Some(port_name);
         self.enabled = true;

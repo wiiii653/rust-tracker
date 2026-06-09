@@ -6,6 +6,13 @@
 
 use egui::{Color32, Visuals};
 
+/// Available color themes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Theme {
+    Ft2Classic,
+    ModernDark,
+}
+
 /// Apply the FT2 Classic theme — dark blue background, cyan/white text.
 pub fn apply_ft2_classic(ctx: &egui::Context) {
     let visuals = Visuals {

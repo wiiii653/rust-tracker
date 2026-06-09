@@ -165,8 +165,11 @@ fn effect_to_string(effect: &TrackEffect) -> String {
     }
 }
 
-/// Convert an effect string like "A04" back to a TrackEffect (simplified).
-#[allow(dead_code)]
+/// Convert an effect string like "C40" back to a TrackEffect.
+/// Supports common FT2-compatible effect commands that map directly
+/// to `TrackEffect` variants (others are stored as automation lanes
+/// or handled by the player and are not representable as cell effects).
+/// Used by the pattern editor for hex key entry.
 pub fn parse_effect(s: &str) -> Option<TrackEffect> {
     if s.len() < 3 {
         return None;
@@ -175,20 +178,34 @@ pub fn parse_effect(s: &str) -> Option<TrackEffect> {
     let cmd = chars[0].to_ascii_uppercase();
     let x1 = chars.get(1).and_then(|c| c.to_digit(16))? as usize;
     let x2 = chars.get(2).and_then(|c| c.to_digit(16))? as usize;
+    let param = (x1 << 4) | x2;
 
     match cmd {
         '0' => Some(TrackEffect::Arpeggio {
             half1: x1,
             half2: x2,
         }),
-        'D' => Some(TrackEffect::NoteDelay(x1 * 16 + x2)),
+        'A' | 'C' => Some(TrackEffect::Volume {
+            value: Volume::from_byte_64(param as u8),
+            tick: 0,
+        }),
+        'D' => Some(TrackEffect::NoteDelay(param)),
         'K' => Some(TrackEffect::NoteOff {
-            tick: x1 * 16 + x2,
+            tick: param,
             past: false,
         }),
-        'C' => Some(TrackEffect::Volume {
-            value: Volume::from_byte_64((x1 * 16 + x2) as u8),
-            tick: 0,
+        'L' => Some(TrackEffect::NoteFadeOut {
+            tick: param,
+            past: false,
+        }),
+        'M' => Some(TrackEffect::ChannelVolume(ChannelVolume::from_byte_64(param as u8))),
+        'R' => Some(TrackEffect::NoteRetrig {
+            speed: param,
+            volume_modifier: xmrs::prelude::NoteRetrigOperator::None,
+        }),
+        'T' => Some(TrackEffect::Tremor {
+            on_time: x1,
+            off_time: x2,
         }),
         _ => None,
     }

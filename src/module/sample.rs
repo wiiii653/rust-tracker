@@ -147,6 +147,42 @@ impl SampleData {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sample_data_apply_to_sample_updates_pcm_and_metadata() {
+        let mut sample = Sample {
+            name: "sample".to_string(),
+            relative_pitch: 3,
+            finetune: Finetune::ZERO,
+            volume: ChannelVolume::from_byte_64(40),
+            default_note_volume: Volume::FULL,
+            panning: Panning::CENTER,
+            loop_flag: LoopType::Forward,
+            loop_start: 2,
+            loop_length: 4,
+            sustain_loop_flag: LoopType::No,
+            sustain_loop_start: 0,
+            sustain_loop_length: 0,
+            data: Some(SampleDataType::Mono8(vec![0, 32, -32, 64])),
+        };
+
+        let mut edited = SampleData::from_sample(&sample);
+        edited.amplify(0.5);
+        edited.loop_start = 1;
+        edited.loop_length = 2;
+        edited.volume = 48;
+        edited.apply_to_sample(&mut sample);
+
+        assert!(matches!(sample.data, Some(SampleDataType::Mono8(_))));
+        assert_eq!(sample.loop_start, 1);
+        assert_eq!(sample.loop_length, 2);
+        assert_eq!(sample.volume.to_byte_64(), 48);
+    }
+}
+
 /// Sample editing operations.
 impl SampleData {
     /// Normalize sample to full amplitude.
@@ -231,6 +267,68 @@ impl SampleData {
             self.sustain_loop_start -= start as u32;
         } else {
             self.sustain_loop_start = 0;
+        }
+    }
+
+    /// Write the edited sample back into an xmrs sample in-place.
+    pub fn apply_to_sample(&self, sample: &mut Sample) {
+        sample.data = Some(self.to_sample_data_type(sample.data.as_ref()));
+        sample.loop_flag = self.loop_type;
+        sample.loop_start = self.loop_start;
+        sample.loop_length = self.loop_length;
+        sample.sustain_loop_flag = self.sustain_loop_type;
+        sample.sustain_loop_start = self.sustain_loop_start;
+        sample.sustain_loop_length = self.sustain_loop_length;
+        sample.relative_pitch = self.relative_pitch;
+        sample.finetune = Finetune::ZERO;
+        sample.volume = ChannelVolume::from_byte_64(self.volume);
+    }
+
+    fn to_sample_data_type(&self, original: Option<&SampleDataType>) -> SampleDataType {
+        let original = original.cloned();
+        match original {
+            Some(SampleDataType::Mono8(_)) | None => SampleDataType::Mono8(
+                self.mono_data
+                    .iter()
+                    .map(|&s| (s * 128.0).round().clamp(-128.0, 127.0) as i8)
+                    .collect(),
+            ),
+            Some(SampleDataType::Mono16(_)) => SampleDataType::Mono16(
+                self.mono_data
+                    .iter()
+                    .map(|&s| (s * 32768.0).round().clamp(-32768.0, 32767.0) as i16)
+                    .collect(),
+            ),
+            Some(SampleDataType::Stereo8(_)) => {
+                let mut data = Vec::with_capacity(self.length * 2);
+                for i in 0..self.length {
+                    let left = self.mono_data.get(i).copied().unwrap_or(0.0);
+                    let right = self.right_data.get(i).copied().unwrap_or(left);
+                    data.push((left * 128.0).round().clamp(-128.0, 127.0) as i8);
+                    data.push((right * 128.0).round().clamp(-128.0, 127.0) as i8);
+                }
+                SampleDataType::Stereo8(data)
+            }
+            Some(SampleDataType::Stereo16(_)) => {
+                let mut data = Vec::with_capacity(self.length * 2);
+                for i in 0..self.length {
+                    let left = self.mono_data.get(i).copied().unwrap_or(0.0);
+                    let right = self.right_data.get(i).copied().unwrap_or(left);
+                    data.push((left * 32768.0).round().clamp(-32768.0, 32767.0) as i16);
+                    data.push((right * 32768.0).round().clamp(-32768.0, 32767.0) as i16);
+                }
+                SampleDataType::Stereo16(data)
+            }
+            Some(SampleDataType::StereoFloat(_)) => {
+                let mut data = Vec::with_capacity(self.length * 2);
+                for i in 0..self.length {
+                    let left = self.mono_data.get(i).copied().unwrap_or(0.0);
+                    let right = self.right_data.get(i).copied().unwrap_or(left);
+                    data.push(left);
+                    data.push(right);
+                }
+                SampleDataType::StereoFloat(data)
+            }
         }
     }
 }

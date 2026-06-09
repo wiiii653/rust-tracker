@@ -320,137 +320,122 @@ impl PatternEditor {
     }
 
     fn handle_key(&mut self, key: Key, modifiers: egui::Modifiers, pattern_pos: &crate::module::edit::PatternPosition, commands: &mut Vec<EditCommand>) {
+        // Check if this is a hex digit key (for effect entry)
+        let hex_ch = key_to_hex_digit(key);
+
         match key {
             // --- Navigation ---
             Key::ArrowUp => {
-                if self.current_row > 0 {
-                    self.current_row -= 1;
-                }
+                if self.current_row > 0 { self.current_row -= 1; }
                 self.input_buffer.clear();
             }
             Key::ArrowDown => {
                 self.current_row += 1;
                 self.input_buffer.clear();
             }
-            Key::ArrowLeft => {
-                self.navigate_column_left();
-                self.input_buffer.clear();
-            }
-            Key::ArrowRight => {
-                self.navigate_column_right();
-                self.input_buffer.clear();
-            }
+            Key::ArrowLeft => { self.navigate_column_left(); self.input_buffer.clear(); }
+            Key::ArrowRight => { self.navigate_column_right(); self.input_buffer.clear(); }
             Key::Tab => {
                 if modifiers.shift {
-                    if self.current_channel > 0 {
-                        self.current_channel -= 1;
-                    }
-                } else {
-                    self.current_channel += 1;
-                }
+                    if self.current_channel > 0 { self.current_channel -= 1; }
+                } else { self.current_channel += 1; }
                 self.input_buffer.clear();
             }
             Key::Home => {
-                if modifiers.ctrl {
-                    self.current_order = 0;
-                    self.current_row = 0;
-                } else {
-                    self.current_row = 0;
-                }
+                if modifiers.ctrl { self.current_order = 0; self.current_row = 0; }
+                else { self.current_row = 0; }
                 self.input_buffer.clear();
             }
-            Key::End => {
-                self.input_buffer.clear();
-                // We'd need to know max rows; handled separately
-            }
-            Key::PageUp => {
-                self.current_row = self.current_row.saturating_sub(16);
-                self.input_buffer.clear();
-            }
-            Key::PageDown => {
-                self.current_row += 16;
-                self.input_buffer.clear();
-            }
+            Key::End => { self.input_buffer.clear(); }
+            Key::PageUp => { self.current_row = self.current_row.saturating_sub(16); self.input_buffer.clear(); }
+            Key::PageDown => { self.current_row += 16; self.input_buffer.clear(); }
 
-            // --- Note input (QWERTY keyboard) ---
-            Key::Z => self.enter_note(0, modifiers, pattern_pos, commands),
-            Key::S => self.enter_note(1, modifiers, pattern_pos, commands),
-            Key::X => self.enter_note(2, modifiers, pattern_pos, commands),
-            Key::D => self.enter_note(3, modifiers, pattern_pos, commands),
-            Key::C => self.enter_note(4, modifiers, pattern_pos, commands),
-            Key::V => self.enter_note(5, modifiers, pattern_pos, commands),
-            Key::G => self.enter_note(6, modifiers, pattern_pos, commands),
-            Key::B => self.enter_note(7, modifiers, pattern_pos, commands),
-            Key::H => self.enter_note(8, modifiers, pattern_pos, commands),
-            Key::N => self.enter_note(9, modifiers, pattern_pos, commands),
-            Key::J => self.enter_note(10, modifiers, pattern_pos, commands),
-            Key::M => self.enter_note(11, modifiers, pattern_pos, commands),
+            // --- Note input (QWERTY) — only when cursor is on Note column ---
+            Key::Z if self.cursor_column == CursorColumn::Note => self.enter_note(0, modifiers, pattern_pos, commands),
+            Key::S if self.cursor_column == CursorColumn::Note => self.enter_note(1, modifiers, pattern_pos, commands),
+            Key::X if self.cursor_column == CursorColumn::Note => self.enter_note(2, modifiers, pattern_pos, commands),
+            Key::D if self.cursor_column == CursorColumn::Note => self.enter_note(3, modifiers, pattern_pos, commands),
+            Key::C if self.cursor_column == CursorColumn::Note => self.enter_note(4, modifiers, pattern_pos, commands),
+            Key::V if self.cursor_column == CursorColumn::Note => self.enter_note(5, modifiers, pattern_pos, commands),
+            Key::G if self.cursor_column == CursorColumn::Note => self.enter_note(6, modifiers, pattern_pos, commands),
+            Key::B if self.cursor_column == CursorColumn::Note => self.enter_note(7, modifiers, pattern_pos, commands),
+            Key::H if self.cursor_column == CursorColumn::Note => self.enter_note(8, modifiers, pattern_pos, commands),
+            Key::N if self.cursor_column == CursorColumn::Note => self.enter_note(9, modifiers, pattern_pos, commands),
+            Key::J if self.cursor_column == CursorColumn::Note => self.enter_note(10, modifiers, pattern_pos, commands),
+            Key::M if self.cursor_column == CursorColumn::Note => self.enter_note(11, modifiers, pattern_pos, commands),
 
-            Key::Q => self.enter_note(12, modifiers, pattern_pos, commands),
-            Key::Num2 => self.enter_note(13, modifiers, pattern_pos, commands),
-            Key::W => self.enter_note(14, modifiers, pattern_pos, commands),
-            Key::Num3 => self.enter_note(15, modifiers, pattern_pos, commands),
-            Key::E => self.enter_note(16, modifiers, pattern_pos, commands),
-            Key::R => self.enter_note(17, modifiers, pattern_pos, commands),
-            Key::Num5 => self.enter_note(18, modifiers, pattern_pos, commands),
-            Key::T => self.enter_note(19, modifiers, pattern_pos, commands),
-            Key::Num6 => self.enter_note(20, modifiers, pattern_pos, commands),
-            Key::Y => self.enter_note(21, modifiers, pattern_pos, commands),
-            Key::Num7 => self.enter_note(22, modifiers, pattern_pos, commands),
-            Key::U => self.enter_note(23, modifiers, pattern_pos, commands),
+            Key::Q if self.cursor_column == CursorColumn::Note => self.enter_note(12, modifiers, pattern_pos, commands),
+            Key::Num2 if self.cursor_column == CursorColumn::Note => self.enter_note(13, modifiers, pattern_pos, commands),
+            Key::W if self.cursor_column == CursorColumn::Note => self.enter_note(14, modifiers, pattern_pos, commands),
+            Key::Num3 if self.cursor_column == CursorColumn::Note => self.enter_note(15, modifiers, pattern_pos, commands),
+            Key::E if self.cursor_column == CursorColumn::Note => self.enter_note(16, modifiers, pattern_pos, commands),
+            Key::R if self.cursor_column == CursorColumn::Note => self.enter_note(17, modifiers, pattern_pos, commands),
+            Key::Num5 if self.cursor_column == CursorColumn::Note => self.enter_note(18, modifiers, pattern_pos, commands),
+            Key::T if self.cursor_column == CursorColumn::Note => self.enter_note(19, modifiers, pattern_pos, commands),
+            Key::Num6 if self.cursor_column == CursorColumn::Note => self.enter_note(20, modifiers, pattern_pos, commands),
+            Key::Y if self.cursor_column == CursorColumn::Note => self.enter_note(21, modifiers, pattern_pos, commands),
+            Key::Num7 if self.cursor_column == CursorColumn::Note => self.enter_note(22, modifiers, pattern_pos, commands),
+            Key::U if self.cursor_column == CursorColumn::Note => self.enter_note(23, modifiers, pattern_pos, commands),
 
-            Key::Delete | Key::Backspace => {
-                self.delete_note(pattern_pos, commands);
-            }
+            Key::Delete | Key::Backspace => { self.delete_note(pattern_pos, commands); }
 
-            // Insert / toggle edit
-            Key::Space => {
-                self.edit_mode = !self.edit_mode;
-            }
+            Key::Space => { self.edit_mode = !self.edit_mode; }
 
-            // Escape
-            Key::Escape => {
-                self.input_buffer.clear();
-                self.edit_mode = false;
-            }
+            Key::Escape => { self.input_buffer.clear(); self.edit_mode = false; }
 
-            _ => {
-                // Handle hex digits for effect values
-                if let Key::Num0 | Key::Num1 | Key::Num2 | Key::Num3 | Key::Num4 | Key::Num5
-                | Key::Num6 | Key::Num7 | Key::Num8 | Key::Num9 = key
+            // --- Hex digit entry (when on Effect column, or any hex key when not on Note) ---
+            _ if hex_ch.is_some() => {
+                let ch = hex_ch.unwrap();
+                self.input_buffer.push(ch);
+
+                // On 3-digit hex entry when cursor is on Effect column,
+                // parse and commit the effect immediately.
+                if self.input_buffer.len() >= 3
+                    && matches!(self.cursor_column, CursorColumn::Effect(_))
                 {
-                    let digit = match key {
-                        Key::Num0 => '0',
-                        Key::Num1 => '1',
-                        Key::Num2 => '2',
-                        Key::Num3 => '3',
-                        Key::Num4 => '4',
-                        Key::Num5 => '5',
-                        Key::Num6 => '6',
-                        Key::Num7 => '7',
-                        Key::Num8 => '8',
-                        Key::Num9 => '9',
-                        _ => unreachable!(),
-                    };
-                    self.input_buffer.push(digit);
-                }
-                if let Key::A | Key::B | Key::F | Key::K | Key::P | Key::R | Key::T = key {
-                    let ch = match key {
-                        Key::A => 'A',
-                        Key::B => 'B',
-                        Key::F => 'F',
-                        Key::K => 'K',
-                        Key::P => 'P',
-                        Key::R => 'R',
-                        Key::T => 'T',
-                        _ => unreachable!(),
-                    };
-                    self.input_buffer.push(ch);
+                    let buf = self.input_buffer.clone();
+                    self.input_buffer.clear();
+                    if let Some(track_idx) = pattern_pos.tracks.get(self.current_channel).and_then(|t| *t) {
+                        if let Some(effect) = crate::module::edit::parse_effect(&buf) {
+                            commands.push(EditCommand::AddCellEffect {
+                                track: track_idx,
+                                row_offset: self.current_row as u32,
+                                effect,
+                            });
+                        }
+                    }
                 }
             }
+
+            _ => {} // Ignore other keys
         }
     }
+}
 
+/// Map an egui `Key` to a hex digit character (0-9, A-F), or None if not a hex key.
+fn key_to_hex_digit(key: Key) -> Option<char> {
+    match key {
+        Key::Num0 => Some('0'),
+        Key::Num1 => Some('1'),
+        Key::Num2 => Some('2'),
+        Key::Num3 => Some('3'),
+        Key::Num4 => Some('4'),
+        Key::Num5 => Some('5'),
+        Key::Num6 => Some('6'),
+        Key::Num7 => Some('7'),
+        Key::Num8 => Some('8'),
+        Key::Num9 => Some('9'),
+        Key::A => Some('A'),
+        Key::B => Some('B'),
+        Key::C => Some('C'),
+        Key::D => Some('D'),
+        Key::E => Some('E'),
+        Key::F => Some('F'),
+        _ => None,
+    }
+}
+
+impl PatternEditor {
     fn navigate_column_left(&mut self) {
         match self.cursor_column {
             CursorColumn::Note => {
@@ -473,10 +458,7 @@ impl PatternEditor {
             CursorColumn::Instrument => self.cursor_column = CursorColumn::Volume,
             CursorColumn::Volume => self.cursor_column = CursorColumn::Effect(0),
             CursorColumn::Effect(0) => self.cursor_column = CursorColumn::Effect(1),
-            CursorColumn::Effect(1) => {
-                self.cursor_column = CursorColumn::Effect(2);
-            }
-            CursorColumn::Effect(_) => {
+            CursorColumn::Effect(1) | CursorColumn::Effect(_) => {
                 self.current_channel += 1;
                 self.cursor_column = CursorColumn::Note;
             }
