@@ -120,8 +120,16 @@ impl RustTracker {
     }
 
     pub fn render_instr_editor_app(&mut self, ui: &mut egui::Ui) {
-        if let Some(ref module) = self.state.module {
-            self.instr_editor.show(ui, module);
+        if let Some(ref mut module) = self.state.module {
+            let changed = self.instr_editor.show(ui, module);
+            if changed {
+                self.state.bump_module_revision();
+                if self.state.is_playing() {
+                    if let Err(e) = self.state.sync_playback_module() {
+                        self.error_message = Some(format!("Playback sync failed: {}", e));
+                    }
+                }
+            }
         } else {
             ui.label("No module loaded.");
         }

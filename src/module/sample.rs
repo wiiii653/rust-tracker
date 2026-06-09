@@ -99,6 +99,75 @@ impl SampleData {
         }
     }
 
+    /// Load sample data from a WAV file.
+    pub fn from_wav_path(path: &std::path::Path) -> anyhow::Result<Self> {
+        let mut reader = hound::WavReader::open(path)
+            .map_err(|e| anyhow::anyhow!("Failed to open WAV: {}", e))?;
+        let spec = reader.spec();
+        let channels = spec.channels as usize;
+        let sample_rate = spec.sample_rate;
+        let bits = spec.bits_per_sample as u8;
+
+        // Read all samples as normalized f32.
+        // hound auto-converts integer formats to i16/f32 as appropriate.
+        let all_samples: Vec<f32> = match spec.sample_format {
+            hound::SampleFormat::Float => reader
+                .samples::<f32>()
+                .map(|r| r.unwrap_or(0.0))
+                .collect(),
+            hound::SampleFormat::Int => {
+                let max_val = 2.0_f32.powi(spec.bits_per_sample as i32 - 1);
+                reader
+                    .samples::<i16>()
+                    .map(|r| r.unwrap_or(0) as f32 / max_val)
+                    .collect()
+            }
+        };
+
+        let (mono_data, right_data, is_stereo) = if channels >= 2 {
+            let left: Vec<f32> = all_samples.iter().step_by(2).copied().collect();
+            let right: Vec<f32> = all_samples.iter().skip(1).step_by(2).copied().collect();
+            (left, right, true)
+        } else {
+            (all_samples, Vec::new(), false)
+        };
+
+        let length = mono_data.len();
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("untitled")
+            .to_string();
+
+        // Compute relative pitch so the sample plays at its native rate
+        // relative to middle-C (C-5 in xmrs = 8363 Hz).
+        let base_rate = 8363.0;
+        let relative_pitch = if sample_rate > 0 {
+            (12.0 * (sample_rate as f64 / base_rate).log2()).round() as i8
+        } else {
+            0
+        };
+
+        Ok(SampleData {
+            name,
+            length,
+            sample_rate: sample_rate.max(1),
+            bits,
+            mono_data,
+            is_stereo,
+            right_data,
+            loop_type: LoopType::No,
+            loop_start: 0,
+            loop_length: 0,
+            sustain_loop_type: LoopType::No,
+            sustain_loop_start: 0,
+            sustain_loop_length: 0,
+            relative_pitch,
+            finetune: 0,
+            volume: 64,
+        })
+    }
+
     /// Create a new empty SampleData.
     #[allow(dead_code)]
     pub fn empty() -> Self {
@@ -287,10 +356,16 @@ impl SampleData {
     fn to_sample_data_type(&self, original: Option<&SampleDataType>) -> SampleDataType {
         let original = original.cloned();
         match original {
-            Some(SampleDataType::Mono8(_)) | None => SampleDataType::Mono8(
+            Some(SampleDataType::Mono8(_)) => SampleDataType::Mono8(
                 self.mono_data
                     .iter()
                     .map(|&s| (s * 128.0).round().clamp(-128.0, 127.0) as i8)
+                    .collect(),
+            ),
+            None => SampleDataType::Mono16(
+                self.mono_data
+                    .iter()
+                    .map(|&s| (s * 32768.0).round().clamp(-32768.0, 32767.0) as i16)
                     .collect(),
             ),
             Some(SampleDataType::Mono16(_)) => SampleDataType::Mono16(
