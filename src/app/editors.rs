@@ -63,7 +63,7 @@ impl RustTracker {
     }
 
     pub fn render_module_info_app(&mut self, ui: &mut egui::Ui) {
-        Frame::central_panel(&egui::Style::default()).show(ui, |ui| {
+        Frame::none().show(ui, |ui| {
             if let Some(ref info) = self.state.module_info {
                 ui.heading(&info.name);
                 ui.separator();

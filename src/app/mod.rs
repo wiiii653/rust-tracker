@@ -12,7 +12,7 @@ use crate::ui::order_list::OrderList;
 use crate::ui::pattern_editor::PatternEditor;
 use crate::ui::sample_editor::SampleEditor;
 use crate::ui::theme::{self, Theme};
-use egui::{CentralPanel, Color32, Key, SidePanel, TopBottomPanel};
+use egui::{Color32, Key, SidePanel, TopBottomPanel};
 use log::info;
 use std::path::PathBuf;
 
@@ -59,6 +59,11 @@ pub struct RustTracker {
     window_title: String,
     /// Request a graceful app shutdown from UI code.
     pub quit_requested: bool,
+
+    /// Background image texture handle (loaded on first frame).
+    bg_texture: Option<egui::TextureHandle>,
+    /// Raw RGBA pixels for the background image, plus (width, height).
+    bg_image_data: Option<(Vec<u8>, usize, usize)>,
 }
 
 impl RustTracker {
@@ -87,6 +92,9 @@ impl RustTracker {
             EditorView::Info
         };
 
+        // Load background image
+        let bg_image_data = Self::load_background_image();
+
         Self {
             state,
             error_message: error,
@@ -104,6 +112,8 @@ impl RustTracker {
             current_theme: None,
             window_title: "rust-tracker".to_string(),
             quit_requested: false,
+            bg_texture: None,
+            bg_image_data,
         }
     }
 
@@ -113,6 +123,15 @@ impl RustTracker {
         if self.current_theme.is_none() {
             theme::apply_ft2_classic(ctx);
             self.current_theme = Some(Theme::Ft2Classic);
+        }
+
+        // Lazily create background texture on first frame
+        if self.bg_texture.is_none() {
+            if let Some((ref data, w, h)) = self.bg_image_data {
+                let color_image = egui::ColorImage::from_rgba_unmultiplied([w, h], data);
+                let handle = ctx.load_texture("window_bg", color_image, Default::default());
+                self.bg_texture = Some(handle);
+            }
         }
 
         // Update window title
@@ -238,23 +257,53 @@ impl RustTracker {
                                 }
                             }
                         });
-                    CentralPanel::default().show(ctx, |ui| { self.render_pattern_editor_app(ui); });
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::none())
+                        .show(ctx, |ui| {
+                            self.paint_central_bg(ui);
+                            self.render_pattern_editor_app(ui);
+                        });
                 }
                 EditorView::Samples => {
-                    CentralPanel::default().show(ctx, |ui| { self.render_sample_editor_app(ui); });
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::none())
+                        .show(ctx, |ui| {
+                            self.paint_central_bg(ui);
+                            self.render_sample_editor_app(ui);
+                        });
                 }
                 EditorView::Instruments => {
-                    CentralPanel::default().show(ctx, |ui| { self.render_instr_editor_app(ui); });
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::none())
+                        .show(ctx, |ui| {
+                            self.paint_central_bg(ui);
+                            self.render_instr_editor_app(ui);
+                        });
                 }
                 EditorView::DiskOp => {
-                    CentralPanel::default().show(ctx, |ui| { self.render_disk_op_app(ui); });
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::none())
+                        .show(ctx, |ui| {
+                            self.paint_central_bg(ui);
+                            self.render_disk_op_app(ui);
+                        });
                 }
                 EditorView::Info => {
-                    CentralPanel::default().show(ctx, |ui| { self.render_module_info_app(ui); });
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::none())
+                        .show(ctx, |ui| {
+                            self.paint_central_bg(ui);
+                            self.render_module_info_app(ui);
+                        });
                 }
             }
         } else {
-            CentralPanel::default().show(ctx, |ui| { self.render_empty_state_app(ui); });
+            egui::CentralPanel::default()
+                .frame(egui::Frame::none())
+                .show(ctx, |ui| {
+                    self.paint_central_bg(ui);
+                    self.render_empty_state_app(ui);
+                });
         }
 
         // --- Status bar ---
@@ -371,6 +420,35 @@ impl RustTracker {
                 }
             }
         });
+    }
+
+    /// Load and decode the background PNG image from the resources directory.
+    fn load_background_image() -> Option<(Vec<u8>, usize, usize)> {
+        let data = include_bytes!("../../resources/rust-tracker.png");
+        match image::load_from_memory(data) {
+            Ok(img) => {
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                Some((rgba.into_raw(), w as usize, h as usize))
+            }
+            Err(e) => {
+                log::error!("Failed to load background image: {}", e);
+                None
+            }
+        }
+    }
+
+    /// Paint the background image within the given ui's max rect.
+    fn paint_central_bg(&self, ui: &mut egui::Ui) {
+        if let Some(ref tex) = self.bg_texture {
+            let rect = ui.max_rect();
+            ui.painter().image(
+                tex.id(),
+                rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 12), // ~5% opacity — barely visible watermark
+            );
+        }
     }
 
     fn save_module_as_mod(&self, path: &std::path::Path) -> anyhow::Result<()> {
